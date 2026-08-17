@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>补货整理工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:linear-gradient(135deg,#e0f2fe 0%,#f0fdf4 50%,#fef3c7 100%);
+    min-height:100vh;padding:20px;
+}
+.container{max-width:1200px;margin:0 auto}
+header{text-align:center;margin-bottom:24px}
+header h1{font-size:1.8rem;color:#1f2937;margin-bottom:8px}
+.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.badge{
+    display:inline-block;background:#d1fae5;color:#059669;
+    padding:3px 12px;border-radius:12px;font-size:0.78rem;font-weight:500;
+}
+.badge.blue{background:#dbeafe;color:#2563eb}
+.badge.amber{background:#fef3c7;color:#d97706}
+.toolbar{
+    display:flex;gap:10px;justify-content:center;margin-bottom:20px;flex-wrap:wrap;
+}
+button{
+    padding:9px 20px;border:none;border-radius:8px;font-size:0.88rem;
+    cursor:pointer;transition:all 0.2s;font-weight:500;font-family:inherit;
+}
+.btn-primary{background:#10b981;color:white}
+.btn-primary:hover{background:#059669;transform:translateY(-1px);box-shadow:0 4px 8px rgba(16,185,129,0.3)}
+.btn-primary:active{transform:translateY(0)}
+.btn-secondary{background:#f3f4f6;color:#374151}
+.btn-secondary:hover{background:#e5e7eb}
+.btn-copy{background:#3b82f6;color:white}
+.btn-copy:hover{background:#2563eb}
+main{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:768px){main{grid-template-columns:1fr}}
+.panel{
+    background:white;border-radius:16px;padding:20px;
+    box-shadow:0 4px 6px -1px rgba(0,0,0,0.1),0 2px 4px -2px rgba(0,0,0,0.05);
+}
+.panel-title{
+    font-size:1rem;font-weight:600;color:#1f2937;margin-bottom:12px;
+    display:flex;align-items:center;gap:8px;
+}
+.panel-title::before{
+    content:"";display:inline-block;width:4px;height:16px;
+    background:#10b981;border-radius:2px;
+}
+textarea{
+    width:100%;height:380px;padding:14px;border:2px solid #e5e7eb;
+    border-radius:10px;font-size:0.92rem;line-height:1.7;resize:vertical;
+    font-family:inherit;transition:border-color 0.2s;
+}
+textarea:focus{outline:none;border-color:#10b981}
+#output{
+    width:100%;min-height:380px;padding:14px;border:2px solid #e5e7eb;
+    border-radius:10px;font-size:0.95rem;line-height:2;overflow-y:auto;
+    white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere;
+}
+#output:empty::before{
+    content:"整理结果将显示在这里...";color:#9ca3af;font-size:0.9rem;
+}
+.output-line{margin-bottom:4px}
+.item{font-weight:600;color:#1f2937}
+.qty{color:#059669;font-weight:600}
+.sep{color:#9ca3af}
+.stats{
+    margin-top:12px;padding:10px 14px;background:#f9fafb;border-radius:8px;
+    font-size:0.82rem;color:#6b7280;display:none;
+}
+.stats.show{display:block}
+.stats span{color:#059669;font-weight:600}
+.toast{
+    position:fixed;bottom:30px;left:50%;
+    transform:translateX(-50%) translateY(100px);
+    background:#1f2937;color:white;padding:12px 24px;border-radius:8px;
+    font-size:0.9rem;opacity:0;transition:all 0.3s;z-index:100;
+}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.hint{
+    text-align:center;color:#9ca3af;font-size:0.78rem;margin-top:16px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>补货整理工具</h1>
+    </header>
+    <div class="toolbar">
+        <button class="btn-secondary" onclick="clearInput()">清空</button>
+        <button class="btn-secondary" onclick="pasteInput()">粘贴</button>
+        <button class="btn-copy" onclick="copyResult()">复制结果</button>
+    </div>
+    <main>
+        <div class="panel">
+            <div class="panel-title">输入补货数据</div>
+            <textarea id="input" placeholder="粘贴补货数据...
+
+支持以下格式（可混用）：
+① 独立后缀：A1一斤、C20半斤、G14两斤
+② 连写共享：拼豆E11拼豆E15拼豆A10各半斤
+③ 括号分组：（A1各半斤）（H7六斤）
+④ 标题前缀：1斤: a11, a16, b18, c3（逗号分隔，跨行有效）
+
+换行不影响识别，括号内跨行商品自动归为一组
+数量：半斤、一斤、两斤、三斤...十斤，支持公斤（2公斤=四斤）
+同一商品出现两次自动升级（两个半斤→一个一斤）
+电话/地址等无关内容会自动忽略"></textarea>
+        </div>
+        <div class="panel">
+            <div class="panel-title">整理结果</div>
+            <div id="output"></div>
+            <div id="stats" class="stats"></div>
+        </div>
+    </main>
+    <div class="hint">提示：Ctrl+Enter 快速整理 · 数据仅在本地处理，不会上传</div>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+var quantityOrder = ["半斤","一斤","两斤","三斤","四斤","五斤","六斤","七斤","八斤","九斤","十斤"];
+
+var quantityAliases = {
+    "半斤":"半斤","0.5斤":"半斤",
+    "一斤":"一斤","1斤":"一斤","斤":"一斤",
+    "两斤":"两斤","二斤":"两斤","2斤":"两斤",
+    "三斤":"三斤","3斤":"三斤",
+    "四斤":"四斤","4斤":"四斤",
+    "五斤":"五斤","5斤":"五斤",
+    "六斤":"六斤","6斤":"六斤",
+    "七斤":"七斤","7斤":"七斤",
+    "八斤":"八斤","8斤":"八斤",
+    "九斤":"九斤","9斤":"九斤",
+    "十斤":"十斤","10斤":"十斤",
+    "0.5公斤":"一斤",
+    "1公斤":"两斤",
+    "1.5公斤":"三斤",
+    "2公斤":"四斤",
+    "2.5公斤":"五斤",
+    "3公斤":"六斤",
+    "3.5公斤":"七斤",
+    "4公斤":"八斤",
+    "4.5公斤":"九斤",
+    "5公斤":"十斤",
+    "0.5kg":"一斤",
+    "1kg":"两斤",
+    "1.5kg":"三斤",
+    "2kg":"四斤",
+    "2.5kg":"五斤",
+    "3kg":"六斤",
+    "3.5kg":"七斤",
+    "4kg":"八斤",
+    "4.5kg":"九斤",
+    "5kg":"十斤"
+};
+
+var validRanges = {
+    A:26, B:32, C:29, D:26, E:24, F:25, G:21, H:23, M:15
+};
+
+function validateRanges(counts){
+    var invalid = [];
+    var seen = {};
+    for(var i=0;i<quantityOrder.length;i++){
+        var q = quantityOrder[i];
+        var items = Object.keys(counts[q]);
+        for(var j=0;j<items.length;j++){
+            var item = items[j];
+            if(seen[item]) continue;
+            seen[item] = true;
+            var m = item.match(/^([A-Za-z]+)(\d+)$/);
+            if(!m){ invalid.push(item); continue; }
+            var zone = m[1].toUpperCase();
+            var num = parseInt(m[2]);
+            if(!validRanges[zone] || num < 1 || num > validRanges[zone]){
+                invalid.push(item);
+            }
+        }
+    }
+    return invalid.sort(function(a,b){
+        var mA=a.match(/^([A-Za-z]+)(\d+)$/), mB=b.match(/^([A-Za-z]+)(\d+)$/);
+        if(!mA||!mB) return a.localeCompare(b);
+        if(mA[1]!==mB[1]) return mA[1].localeCompare(mB[1]);
+        return parseInt(mA[2])-parseInt(mB[2]);
+    });
+}
+
+function buildQuantityRegex(){
+    var keys = Object.keys(quantityAliases)
+        .sort(function(a,b){return b.length-a.length;});
+    var escaped = keys.map(function(q){return q.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");});
+    return new RegExp(escaped.join("|"),"gi");
+}
+
+function overlaps(aStart, aEnd, bStart, bEnd){
+    return aStart < bEnd && aEnd > bStart;
+}
+
+function parseInput(text){
+    var counts = {};
+    quantityOrder.forEach(function(q){counts[q]={};});
+
+    var cleaned = text.replace(/([A-Za-z])[\s\u3000]+(\d+)/g, "$1$2");
+
+    var itemRegex = /[A-Za-z]+\d{1,3}(?![\d])/g;
+    var standaloneRegex = /\b\d{1,3}(?![\d])/g;
+    var qtyRegex = buildQuantityRegex();
+    var colonRegex = /[：:]/g;
+    var boundaryRegex = /[（）()]/g;
+    var tokens = [];
+    var qtyPositions = [];
+    var m;
+
+    itemRegex.lastIndex = 0;
+    while((m = itemRegex.exec(cleaned)) !== null){
+        tokens.push({type:"item", pos:m.index, end:m.index+m[0].length,
+                      value:m[0].toUpperCase(), hasLetter:true});
+    }
+    qtyRegex.lastIndex = 0;
+    while((m = qtyRegex.exec(cleaned)) !== null){
+        var q = quantityAliases[m[0].toLowerCase()] || quantityAliases[m[0]] || m[0];
+        if(counts[q]){
+            var qStart = m.index, qEnd = m.index + m[0].length;
+            qtyPositions.push({start:qStart, end:qEnd});
+            tokens.push({type:"qty", pos:qStart, end:qEnd, value:q});
+        }
+    }
+    standaloneRegex.lastIndex = 0;
+    while((m = standaloneRegex.exec(cleaned)) !== null){
+        var sStart = m.index, sEnd = sStart + m[0].length;
+        var skip = false;
+        for(var p=0;p<qtyPositions.length;p++){
+            if(overlaps(sStart, sEnd, qtyPositions[p].start, qtyPositions[p].end)){
+                skip = true; break;
+            }
+        }
+        if(!skip){
+            tokens.push({type:"item", pos:sStart, end:sEnd,
+                          value:m[0].toUpperCase(), hasLetter:false});
+        }
+    }
+    colonRegex.lastIndex = 0;
+    while((m = colonRegex.exec(cleaned)) !== null){
+        tokens.push({type:"colon", pos:m.index, end:m.index+1});
+    }
+    boundaryRegex.lastIndex = 0;
+    while((m = boundaryRegex.exec(cleaned)) !== null){
+        tokens.push({type:"boundary", pos:m.index});
+    }
+    tokens.sort(function(a,b){return a.pos-b.pos;});
+
+    var buffer = [];
+    var activeQty = null;
+    for(var i=0;i<tokens.length;i++){
+        var t = tokens[i];
+        if(t.type === "item"){
+            if(t.consumed) continue;
+            if(activeQty){
+                counts[activeQty][t.value] = (counts[activeQty][t.value]||0)+1;
+            } else if(t.hasLetter){
+                buffer.push(t.value);
+            }
+        } else if(t.type === "qty"){
+            var next = tokens[i+1];
+            var isHeader = false;
+            var isPrefix = false;
+            if(next && next.type === "colon"){
+                var gap = cleaned.substring(t.end, next.pos);
+                if(/^\s*$/.test(gap)){ isHeader = true; }
+            }
+            if(!isHeader && next && next.type === "item" && next.hasLetter
+               && buffer.length === 0){
+                var gap2 = cleaned.substring(t.end, next.pos);
+                if(gap2 === "" || /^\s+$/.test(gap2)){
+                    isPrefix = true;
+                }
+            }
+            if(isHeader){
+                activeQty = t.value;
+                buffer = [];
+            } else if(isPrefix){
+                counts[t.value][next.value] = (counts[t.value][next.value]||0)+1;
+                next.consumed = true;
+                activeQty = null;
+                buffer = [];
+            } else {
+                for(var j=0;j<buffer.length;j++){
+                    counts[t.value][buffer[j]] = (counts[t.value][buffer[j]]||0)+1;
+                }
+                activeQty = null;
+                buffer = [];
+            }
+        } else if(t.type === "boundary"){
+            activeQty = null;
+        }
+    }
+    return counts;
+}
+
+function promote(counts){
+    for(var i = 0; i < quantityOrder.length - 1; i++){
+        var currentQ = quantityOrder[i];
+        var nextQ = quantityOrder[i + 1];
+        var items = Object.keys(counts[currentQ]);
+        for(var j = 0; j < items.length; j++){
+            var item = items[j];
+            var count = counts[currentQ][item];
+            if(count >= 2){
+                var promotions = Math.floor(count / 2);
+                var remaining = count % 2;
+                counts[nextQ][item] = (counts[nextQ][item] || 0) + promotions;
+                if(remaining > 0){
+                    counts[currentQ][item] = remaining;
+                } else {
+                    delete counts[currentQ][item];
+                }
+            }
+        }
+    }
+}
+
+function sortItems(items){
+    return items.sort(function(a, b){
+        var mA = a.match(/^([A-Za-z]+)(\d+)$/);
+        var mB = b.match(/^([A-Za-z]+)(\d+)$/);
+        if(!mA || !mB) return a.localeCompare(b);
+        if(mA[1] !== mB[1]) return mA[1].localeCompare(mB[1]);
+        return parseInt(mA[2]) - parseInt(mB[2]);
+    });
+}
+
+function escapeHtml(s){
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function formatOutputText(counts){
+    var lines = [];
+    for(var i = 0; i < quantityOrder.length; i++){
+        var q = quantityOrder[i];
+        var items = Object.keys(counts[q]).filter(function(item){
+            return counts[q][item] > 0;
+        });
+        if(items.length === 0) continue;
+        var sorted = sortItems(items);
+        if(sorted.length === 1){
+            lines.push(sorted[0] + " " + q);
+        } else {
+            lines.push(sorted.join("、") + "、各" + q);
+        }
+    }
+    return lines.join("\n");
+}
+
+function formatOutputHTML(counts){
+    var lines = [];
+    for(var i = 0; i < quantityOrder.length; i++){
+        var q = quantityOrder[i];
+        var items = Object.keys(counts[q]).filter(function(item){
+            return counts[q][item] > 0;
+        });
+        if(items.length === 0) continue;
+        var sorted = sortItems(items);
+        var parts = sorted.map(function(item){
+            return '<span class="item">' + escapeHtml(item) + '</span>';
+        });
+        var line;
+        if(sorted.length === 1){
+            line = parts[0] + ' <span class="qty">' + escapeHtml(q) + '</span>';
+        } else {
+            line = parts.join('<span class="sep">、</span>') +
+                   '<span class="sep">、</span><span class="qty">各' + escapeHtml(q) + '</span>';
+        }
+        lines.push('<div class="output-line">' + line + '</div>');
+    }
+    return lines.join("");
+}
+
+var lastResult = "";
+
+function process(){
+    var input = document.getElementById("input").value;
+    var output = document.getElementById("output");
+    var stats = document.getElementById("stats");
+
+    if(!input.trim()){
+        output.innerHTML = "";
+        stats.classList.remove("show");
+        lastResult = "";
+        return;
+    }
+
+    var counts = parseInput(input);
+    promote(counts);
+    lastResult = formatOutputText(counts);
+    output.innerHTML = formatOutputHTML(counts);
+
+    var invalid = validateRanges(counts);
+    if(invalid.length > 0){
+        var rangeInfo = [];
+        for(var k in validRanges){
+            rangeInfo.push(k + "区(1-" + validRanges[k] + ")");
+        }
+        setTimeout(function(){
+            alert("以下货位编号超出有效范围：\n\n" + invalid.join("、") +
+                  "\n\n有效范围：\n" + rangeInfo.join("  "));
+        }, 100);
+    }
+
+    var totalItems = 0;
+    var totalCategories = 0;
+    var breakdown = [];
+    for(var i = 0; i < quantityOrder.length; i++){
+        var q = quantityOrder[i];
+        var items = Object.keys(counts[q]).filter(function(item){
+            return counts[q][item] > 0;
+        });
+        if(items.length > 0){
+            totalItems += items.length;
+            totalCategories++;
+            breakdown.push(q + ":" + items.length);
+        }
+    }
+
+    if(totalItems > 0){
+        stats.classList.add("show");
+        stats.innerHTML = "共整理 <span>" + totalItems + "</span> 个商品，<span>" +
+                          totalCategories + "</span> 个规格 &nbsp;|&nbsp; " + breakdown.join(" · ");
+    } else {
+        stats.classList.remove("show");
+        output.innerHTML = '<span style="color:#9ca3af;font-size:0.9rem">未识别到有效的补货数据，请检查格式...</span>';
+    }
+}
+
+function clearInput(){
+    document.getElementById("input").value = "";
+    document.getElementById("output").innerHTML = "";
+    document.getElementById("stats").classList.remove("show");
+    lastResult = "";
+}
+
+function pasteInput(){
+    if(navigator.clipboard && navigator.clipboard.readText){
+        navigator.clipboard.readText().then(function(text){
+            document.getElementById("input").value = text;
+            process();
+            showToast("已粘贴剪贴板内容");
+        }).catch(function(){
+            document.getElementById("input").focus();
+            showToast("无法自动粘贴，请按 Ctrl+V 手动粘贴");
+        });
+    } else {
+        document.getElementById("input").focus();
+        showToast("请按 Ctrl+V 手动粘贴");
+    }
+}
+
+function copyResult(){
+    if(!lastResult){
+        showToast("没有可复制的结果");
+        return;
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(lastResult).then(function(){
+            showToast("已复制到剪贴板");
+        }).catch(function(){
+            fallbackCopy(lastResult);
+        });
+    } else {
+        fallbackCopy(lastResult);
+    }
+}
+
+function fallbackCopy(text){
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); showToast("已复制到剪贴板"); }
+    catch(e){ showToast("复制失败，请手动选择复制"); }
+    document.body.removeChild(ta);
+}
+
+function showToast(msg){
+    var toast = document.getElementById("toast");
+    toast.textContent = msg;
+    toast.classList.add("show");
+    setTimeout(function(){ toast.classList.remove("show"); }, 2000);
+}
+
+var debounceTimer;
+document.getElementById("input").addEventListener("input", function(){
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(process, 400);
+});
+
+document.getElementById("input").addEventListener("keydown", function(e){
+    if((e.ctrlKey || e.metaKey) && e.key === "Enter"){
+        e.preventDefault();
+        process();
+    }
+});
+</script>
+</body>
+</html>
