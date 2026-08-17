@@ -224,6 +224,10 @@ function parseInput(text){
         var q = quantityAliases[m[0].toLowerCase()] || quantityAliases[m[0]] || m[0];
         if(counts[q]){
             var qStart = m.index, qEnd = m.index + m[0].length;
+            var charBefore = qStart > 0 ? cleaned.charAt(qStart - 1) : "";
+            if(charBefore === '.'){
+                continue;
+            }
             qtyPositions.push({start:qStart, end:qEnd});
             tokens.push({type:"qty", pos:qStart, end:qEnd, value:q});
         }
@@ -259,9 +263,26 @@ function parseInput(text){
         if(t.type === "item"){
             if(t.consumed) continue;
             if(activeQty){
-                counts[activeQty][t.value] = (counts[activeQty][t.value]||0)+1;
+                var before = t.pos > 0 ? cleaned.charAt(t.pos - 1) : "";
+                var before2 = t.pos > 1 ? cleaned.charAt(t.pos - 2) : "";
+                var inItemContext = true;
+                if(/[\u4e00-\u9fff]/.test(before) && before2 + before !== '拼豆' && before !== '和'){
+                    inItemContext = false;
+                }
+                if(inItemContext){
+                    counts[activeQty][t.value] = (counts[activeQty][t.value]||0)+1;
+                } else {
+                    activeQty = null;
+                    buffer.push(t.value);
+                }
             } else if(t.hasLetter){
-                buffer.push(t.value);
+                var before = t.pos > 0 ? cleaned.charAt(t.pos - 1) : "";
+                var before2 = t.pos > 1 ? cleaned.charAt(t.pos - 2) : "";
+                var allowBuffer = true;
+                if(/[\u4e00-\u9fff]/.test(before) && before2 + before !== '拼豆' && before !== '和'){
+                    allowBuffer = false;
+                }
+                if(allowBuffer){ buffer.push(t.value); }
             }
         } else if(t.type === "qty"){
             var next = tokens[i+1];
@@ -280,6 +301,7 @@ function parseInput(text){
             }
             if(isHeader){
                 activeQty = t.value;
+                next.consumed = true;
                 buffer = [];
             } else if(isPrefix){
                 counts[t.value][next.value] = (counts[t.value][next.value]||0)+1;
@@ -295,6 +317,8 @@ function parseInput(text){
             }
         } else if(t.type === "boundary"){
             activeQty = null;
+        } else if(t.type === "colon"){
+            if(!t.consumed){ activeQty = null; }
         }
     }
     return counts;
